@@ -8,9 +8,10 @@
 <style>
   :root{
     --cyan: #00ffff;
-    --pink: #ff00aa;
+    --pink: #ff00aa; /* Kept variable for particles, removed from UI */
     --bg: #000;
     --ui-glow: 0 0 20px rgba(0,255,255,0.18);
+    --thumb-glow: 0 0 10px var(--cyan);
   }
   html,body{height:100%;margin:0;background:var(--bg);font-family:'Rajdhani',sans-serif;overflow:hidden;color:#cfefff}
   canvas{display:block}
@@ -35,7 +36,59 @@
   }
   .controls{display:flex;gap:10px;align-items:center}
   label{font-size:0.75rem;opacity:0.85;margin-right:8px}
-  input[type="range"]{width:160px}
+  
+  /* --- CUSTOM SLIDER STYLING --- */
+  input[type="range"] {
+    -webkit-appearance: none;
+    width: 160px;
+    background: transparent;
+    cursor: pointer;
+  }
+  input[type="range"]:focus { outline: none; }
+  
+  /* Webkit (Chrome/Safari) Slider Track */
+  input[type="range"]::-webkit-slider-runnable-track {
+    width: 100%;
+    height: 4px;
+    cursor: pointer;
+    background: rgba(0, 255, 255, 0.2);
+    border-radius: 2px;
+    border: 1px solid rgba(0, 255, 255, 0.1);
+  }
+  /* Webkit Slider Thumb */
+  input[type="range"]::-webkit-slider-thumb {
+    height: 14px;
+    width: 14px;
+    border-radius: 50%;
+    background: var(--cyan);
+    cursor: pointer;
+    -webkit-appearance: none;
+    margin-top: -6px; /* center on track */
+    box-shadow: var(--thumb-glow);
+    transition: transform 0.1s;
+  }
+  input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+
+  /* Firefox Slider Track */
+  input[type="range"]::-moz-range-track {
+    width: 100%;
+    height: 4px;
+    cursor: pointer;
+    background: rgba(0, 255, 255, 0.2);
+    border-radius: 2px;
+    border: 1px solid rgba(0, 255, 255, 0.1);
+  }
+  /* Firefox Slider Thumb */
+  input[type="range"]::-moz-range-thumb {
+    height: 14px;
+    width: 14px;
+    border: none;
+    border-radius: 50%;
+    background: var(--cyan);
+    cursor: pointer;
+    box-shadow: var(--thumb-glow);
+  }
+
   button, .small-btn{
     background:transparent;border:1px solid rgba(0,255,255,0.14);color:var(--cyan);padding:8px 12px;border-radius:8px;cursor:pointer;font-weight:700;
   }
@@ -47,7 +100,9 @@
   #start-btn{pointer-events:auto;margin-top:10px;background:transparent;border:1px solid rgba(0,255,255,0.28);color:var(--cyan);padding:12px 36px;font-size:0.95rem;cursor:pointer;border-radius:8px}
   #start-btn:hover{background:rgba(0,255,255,0.05);box-shadow:var(--ui-glow)}
   .loader-wrap{width:320px;max-width:60vw;height:6px;border-radius:8px;background:rgba(255,255,255,0.02);overflow:hidden}
-  .loader-bar{height:100%;width:0;background:linear-gradient(90deg,var(--cyan),var(--pink));box-shadow:0 0 14px rgba(0,255,255,0.18);transition:width .4s}
+  
+  /* FIXED: Loader is now pure Cyan */
+  .loader-bar{height:100%;width:0;background:var(--cyan);box-shadow:0 0 14px var(--cyan);transition:width .4s}
 
   /* status */
   #status-bar{position:fixed;left:20px;bottom:20px;font-size:0.8rem;border-left:2px solid var(--cyan);padding-left:12px;opacity:0.95;pointer-events:auto;background:rgba(0,0,0,0.2);border-radius:6px;padding:10px 12px}
@@ -72,7 +127,6 @@
 </head>
 <body>
 
-  <!-- UI -->
   <div id="ui-layer">
     <div class="top-bar" style="width:100%;">
       <div class="brand hud-text">
@@ -99,8 +153,7 @@
       </div>
     </div>
 
-    <div style="height:26px"></div> <!-- spacer -->
-  </div>
+    <div style="height:26px"></div> </div>
 
   <div id="status-bar" class="hud-text" role="status" aria-live="polite">
     <div class="status-item" id="st-track">SYSTEM: STANDBY</div>
@@ -177,6 +230,10 @@
   let paused = false;
   let mouseEnabled = true; // fallback to mouse/touch if no camera
   let deviceHasCamera = true;
+  
+  // Reusable vectors for performance
+  const _tempVec = new THREE.Vector3();
+  const _tempDir = new THREE.Vector3();
 
   // UI init values
   cntVal.innerText = CONFIG.count;
@@ -232,8 +289,10 @@
   function onCountChange(e){
     const v = Math.max(1024, Number(e.target.value));
     cntVal.innerText = v;
-    // do not instantly recreate heavy arrays on slide; wait for mouseup to apply.
+    // do not instantly recreate heavy arrays on slide; wait for mouseup/change.
   }
+  
+  // Use 'change' for heavy operation (mouse up)
   cntRange.addEventListener('change', (e)=>{
     const v = Math.max(1024, Number(e.target.value));
     CONFIG.count = v;
@@ -324,7 +383,6 @@
   }
 
   function recreateParticles(){
-    // friendly cap to avoid freezing device
     const cap = Math.min(CONFIG.count, 20000);
     CONFIG.count = cap;
     createParticles(CONFIG.count, CONFIG.radius);
@@ -403,7 +461,15 @@
       loaderBar.style.width = "55%";
       const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false });
       videoEl.srcObject = stream;
-      await videoEl.play();
+      
+      // Wait for video to actually be ready
+      await new Promise((resolve) => {
+          videoEl.onloadedmetadata = () => {
+              videoEl.play();
+              resolve();
+          };
+      });
+
       isVideoPlaying = true;
       loaderBar.style.width = "80%";
       stTrack.innerText = "SYSTEM: CAMERA ONLINE";
@@ -420,19 +486,17 @@
   /***** PROCESS & ANIMATE *****/
   async function processFrameIfReady(){
     const videoEl = document.getElementById('webcam-video');
-    if(!handLandmarker || !isVideoPlaying || !videoEl) return null;
+    // Safety check: video must be readyState >= 2 (HAVE_CURRENT_DATA)
+    if(!handLandmarker || !isVideoPlaying || !videoEl || videoEl.readyState < 2) return null;
 
-    // detectForVideo returns results object or promise depending on build. Wrap in try/catch.
     try{
       const results = handLandmarker.detectForVideo(videoEl, performance.now());
       return results;
     }catch(err){
-      // Some builds return a Promise
       try{
         const results = await handLandmarker.detectForVideo(videoEl, performance.now());
         return results;
       }catch(inner){
-        console.warn('hand detect failed', inner);
         return null;
       }
     }
@@ -440,14 +504,18 @@
 
   // map normalized landmark to world position using camera projection (approx)
   function projectToWorld(lm){
-    // approximate mapping from normalized screen coords to world ray
     // lm: {x,y} normalized [0..1]
     const nx = (lm.x) * 2 - 1;
     const ny = -(lm.y) * 2 + 1;
-    const vec = new THREE.Vector3(nx, ny, 0.5).unproject(camera);
-    const dir = vec.sub(camera.position).normalize();
-    const dist = -camera.position.z / dir.z;
-    return camera.position.clone().add(dir.multiplyScalar(dist));
+    
+    // reuse vectors to avoid GC pressure
+    _tempVec.set(nx, ny, 0.5);
+    _tempVec.unproject(camera);
+    _tempDir.copy(_tempVec).sub(camera.position).normalize();
+    const dist = -camera.position.z / _tempDir.z;
+    
+    // Result
+    return _tempVec.copy(camera.position).add(_tempDir.multiplyScalar(dist));
   }
 
   function processGestures(results){
@@ -480,7 +548,10 @@
     // otherwise single hand gestures
     const lm = hands[0];
     const wristToMiddleTip = Math.hypot(lm[0].x - lm[12].x, lm[0].y - lm[12].y);
+    
+    // Update target using projection
     interactionTarget.copy(projectToWorld(lm[9]));
+    
     if(wristToMiddleTip < 0.15){
       if(currentGesture !== 'FIST'){
         currentGesture = 'FIST';
@@ -497,7 +568,8 @@
   }
 
   function updateParticles(dt){
-    if(!geometry) return;
+    if(!geometry || !particles) return;
+    
     const p = geometry.attributes.position.array;
     const c = geometry.attributes.color.array;
     const cnt = CONFIG.count;
@@ -582,10 +654,14 @@
       if(!mouseEnabled) return;
       const nx = (clientX / innerWidth) * 2 - 1;
       const ny = -(clientY / innerHeight) * 2 + 1;
-      const vec = new THREE.Vector3(nx, ny, 0.5).unproject(camera);
-      const dir = vec.sub(camera.position).normalize();
-      const dist = -camera.position.z / dir.z;
-      interactionTarget.copy(camera.position.clone().add(dir.multiplyScalar(dist)));
+      
+      _tempVec.set(nx, ny, 0.5);
+      _tempVec.unproject(camera);
+      _tempDir.copy(_tempVec).sub(camera.position).normalize();
+      const dist = -camera.position.z / _tempDir.z;
+      
+      interactionTarget.copy(camera.position.clone().add(_tempDir.multiplyScalar(dist)));
+      
       // small visual feedback
       stGesture.innerText = "GESTURE: POINTER";
       stGesture.classList.add('status-active');
@@ -602,6 +678,9 @@
   let lastTime = performance.now();
   async function animate(now = performance.now()){
     requestAnimationFrame(animate);
+    // SAFETY CHECK: Ensure scene is ready
+    if(!particles || !composer || !scene) return;
+    
     if(paused) return;
 
     const dt = (now - lastTime) * 0.001;
@@ -628,8 +707,6 @@
         if(results) processGestures(results);
       }
     }
-
-    // If no video and user hasn't used camera, mouse controls handle interaction (already set)
 
     // Update particles
     updateParticles(dt);
@@ -665,6 +742,7 @@
       loaderBar.style.width = "100%";
       setTimeout(()=>loaderBar.style.width = "0%", 600);
       uiIntro.style.opacity = "0.0";
+      uiIntro.style.pointerEvents = "none"; // Fix: disable interaction on hidden intro
       uiIntro.style.transform = "scale(0.98)";
       expandUniverse();
       return;
@@ -676,7 +754,10 @@
     // finished
     loaderBar.style.width = "100%";
     setTimeout(()=>{
-      uiIntro.style.opacity = "0.0"; uiIntro.style.transform = "scale(0.98)";
+      uiIntro.style.opacity = "0.0"; 
+      uiIntro.style.pointerEvents = "none"; // Fix: disable interaction on hidden intro
+      uiIntro.style.transform = "scale(0.98)";
+      
       stTrack.innerText = "SYSTEM: ONLINE";
       document.getElementById('st-track').classList.add('status-active');
       expandUniverse();
